@@ -925,6 +925,34 @@ ndk::ScopedAStatus StreamCommonImpl::configureMMapStream(int32_t* fd, int64_t* b
     return ndk::ScopedAStatus::fromExceptionCode(EX_UNSUPPORTED_OPERATION);
 }
 
+ndk::ScopedAStatus StreamCommonImpl::createMmapBuffer(
+        ::aidl::android::hardware::audio::core::MmapBufferDescriptor* _aidl_return) {
+    std::lock_guard<std::mutex> guard(mMmapMutex);
+    if (!mMmapCreated) {
+        int32_t fd = -1, flags = 0, bufferSizeFrames = 0;
+        int64_t burstSizeFrames = 0;
+        RETURN_STATUS_IF_ERROR(
+                configureMMapStream(&fd, &burstSizeFrames, &flags, &bufferSizeFrames));
+        mMmapFd = ::ndk::ScopedFileDescriptor(fd);
+        mMmapBurstSizeFrames = burstSizeFrames;
+        mMmapFlags = flags;
+        mMmapBufferSizeFrames = bufferSizeFrames;
+        mMmapCreated = true;
+    }
+    // Every caller gets its own descriptor for the one buffer, so that the copy
+    // handed out at open time and the one returned here can be closed
+    // independently.
+    int dupFd = ::dup(mMmapFd.get());
+    if (dupFd < 0) {
+        LOG(ERROR) << __func__ << ": failed to dup the MMAP buffer fd";
+        return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+    }
+    _aidl_return->sharedMemory.fd = ::ndk::ScopedFileDescriptor(dupFd);
+    _aidl_return->burstSizeFrames = mMmapBurstSizeFrames;
+    _aidl_return->flags = mMmapFlags;
+    return ndk::ScopedAStatus::ok();
+}
+
 namespace {
 static std::map<AudioDevice, std::string> transformMicrophones(
         const std::vector<MicrophoneInfo>& microphones) {

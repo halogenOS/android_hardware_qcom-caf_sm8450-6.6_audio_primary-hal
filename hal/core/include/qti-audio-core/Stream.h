@@ -446,6 +446,17 @@ struct StreamCommonInterface {
     virtual ndk::ScopedAStatus reconfigureConnectedDevices() = 0;
     virtual ndk::ScopedAStatus configureMMapStream(int32_t* fd, int64_t* burstSizeFrames,
                                                    int32_t* flags, int32_t* bufferSizeFrames) = 0;
+    /**
+     * Creates the MMAP buffer on first use and hands out a descriptor for it.
+     * configureMMapStream() opens a PAL stream and is not repeatable, so this
+     * is the only caller of it: everything that needs the buffer - the
+     * StreamDescriptor filled in at open time and IStreamCommon::
+     * createMmapBuffer() alike - goes through here and shares one buffer.
+     */
+    virtual ndk::ScopedAStatus createMmapBuffer(
+            ::aidl::android::hardware::audio::core::MmapBufferDescriptor* _aidl_return) = 0;
+    /** Valid once createMmapBuffer() has succeeded. */
+    virtual int32_t getMmapBufferSizeFrames() const = 0;
      virtual void setStreamMicMute(const bool muted) = 0;
 };
 
@@ -505,6 +516,12 @@ class StreamCommonDelegator : public ::aidl::android::hardware::audio::core::BnS
         return delegate != nullptr ? delegate->removeEffect(in_effect)
                                    : ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
     }
+    ndk::ScopedAStatus createMmapBuffer(
+            ::aidl::android::hardware::audio::core::MmapBufferDescriptor* _aidl_return) override {
+        auto delegate = mDelegate.lock();
+        return delegate != nullptr ? delegate->createMmapBuffer(_aidl_return)
+                                   : ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+    }
     // It is possible that on the client side the proxy for IStreamCommon will
     // outlive the IStream* instance, and the server side IStream* instance will
     // get destroyed while this IStreamCommon instance is still alive.
@@ -559,6 +576,9 @@ class StreamCommonImpl : virtual public StreamCommonInterface, virtual public Dr
     void setStreamMicMute(const bool muted) override;
     ndk::ScopedAStatus configureMMapStream(int32_t* fd, int64_t* burstSizeFrames, int32_t* flags,
                                            int32_t* bufferSizeFrames) override;
+    ndk::ScopedAStatus createMmapBuffer(
+            ::aidl::android::hardware::audio::core::MmapBufferDescriptor* _aidl_return) override;
+    int32_t getMmapBufferSizeFrames() const override { return mMmapBufferSizeFrames; }
 
     // start of Equivalent of IStreamCallbacks
     void publishTransferReady() { mWorker->publishTransferReady(); }
@@ -588,6 +608,12 @@ class StreamCommonImpl : virtual public StreamCommonInterface, virtual public Dr
     void stopWorker();
 
     const StreamContext& mContextRef;
+    mutable std::mutex mMmapMutex;
+    bool mMmapCreated GUARDED_BY(mMmapMutex) = false;
+    ::ndk::ScopedFileDescriptor mMmapFd GUARDED_BY(mMmapMutex);
+    int64_t mMmapBurstSizeFrames GUARDED_BY(mMmapMutex) = 0;
+    int32_t mMmapFlags GUARDED_BY(mMmapMutex) = 0;
+    int32_t mMmapBufferSizeFrames = 0;
     Metadata mMetadata;
     std::unique_ptr<StreamWorkerInterface> mWorker;
     ChildInterface<StreamCommonDelegator> mCommon;
@@ -741,6 +767,18 @@ class StreamWrapper {
         auto s = mStream.lock();
         if (s) return s->configureMMapStream(fd, burstSizeFrames, flags, bufferSizeFrames);
         return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+    }
+
+    ndk::ScopedAStatus createMmapBuffer(
+            ::aidl::android::hardware::audio::core::MmapBufferDescriptor* desc,
+            int32_t* bufferSizeFrames) {
+        auto s = mStream.lock();
+        if (!s) return ndk::ScopedAStatus::fromExceptionCode(EX_ILLEGAL_STATE);
+        auto status = s->createMmapBuffer(desc);
+        if (status.isOk() && bufferSizeFrames != nullptr) {
+            *bufferSizeFrames = s->getMmapBufferSizeFrames();
+        }
+        return status;
     }
 
   private:

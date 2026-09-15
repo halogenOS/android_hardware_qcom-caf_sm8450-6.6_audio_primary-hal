@@ -854,16 +854,13 @@ ndk::ScopedAStatus Module::openInputStream(const OpenInputStreamArguments& in_ar
     }
 
     if (hasInputMMapFlag(port->flags)) {
-        int32_t fd, mmapFlags, bufferSizeFrames;
-        int64_t burstSizeFrames;
-        RETURN_STATUS_IF_ERROR(streamWrapper.configureMMapStream(&fd, &burstSizeFrames, &mmapFlags,
-                                                                 &bufferSizeFrames));
+        int32_t bufferSizeFrames = 0;
+        ::aidl::android::hardware::audio::core::MmapBufferDescriptor mmapDesc;
+        RETURN_STATUS_IF_ERROR(streamWrapper.createMmapBuffer(&mmapDesc, &bufferSizeFrames));
         _aidl_return->desc.audio.set<StreamDescriptor::AudioBuffer::Tag::mmap>();
         auto& mmapRef = _aidl_return->desc.audio
                             .get<StreamDescriptor::AudioBuffer::Tag::mmap>();
-        mmapRef.sharedMemory.fd = ndk::ScopedFileDescriptor{fd};
-        mmapRef.burstSizeFrames = burstSizeFrames;
-        mmapRef.flags = mmapFlags;
+        mmapRef = std::move(mmapDesc);
         _aidl_return->desc.bufferSizeFrames = bufferSizeFrames;
     }
 
@@ -916,16 +913,13 @@ ndk::ScopedAStatus Module::openOutputStream(const OpenOutputStreamArguments& in_
     }
 
     if (hasOutputMMapFlag(port->flags)) {
-        int32_t fd, mmapFlags, bufferSizeFrames;
-        int64_t burstSizeFrames;
-        RETURN_STATUS_IF_ERROR(streamWrapper.configureMMapStream(&fd, &burstSizeFrames, &mmapFlags,
-                                                                 &bufferSizeFrames));
+        int32_t bufferSizeFrames = 0;
+        ::aidl::android::hardware::audio::core::MmapBufferDescriptor mmapDesc;
+        RETURN_STATUS_IF_ERROR(streamWrapper.createMmapBuffer(&mmapDesc, &bufferSizeFrames));
         _aidl_return->desc.audio.set<StreamDescriptor::AudioBuffer::Tag::mmap>();
         auto& mmapRef = _aidl_return->desc.audio
                                 .get<StreamDescriptor::AudioBuffer::Tag::mmap>();
-        mmapRef.sharedMemory.fd = ndk::ScopedFileDescriptor{fd};
-        mmapRef.burstSizeFrames = burstSizeFrames;
-        mmapRef.flags = mmapFlags;
+        mmapRef = std::move(mmapDesc);
         _aidl_return->desc.bufferSizeFrames = bufferSizeFrames;
     } else if (mTelephony && hasOutputVoipRxFlag(port->flags)) {
         // TODO remove this way of handling streams for telephony
