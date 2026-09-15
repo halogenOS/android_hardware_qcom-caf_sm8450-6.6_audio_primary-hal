@@ -19,6 +19,9 @@ cc_defaults {
     header_libs: [
         "libaudioeffectsaidlqti_headers",
         "libaudio_system_headers",
+        // aidl_effects_utils.h, which comes with libaudio_system_headers,
+        // includes audio_utils/template_utils.h.
+        "libaudioutils_headers",
         "libsystem_headers",
     ],
     cflags: [
